@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "drf_spectacular",
     "rest_framework",
+    "apps.accounts",
     "apps.chats",
     "apps.core",
 ]
@@ -89,6 +90,21 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = env("DJANGO_CORS_ALLOWED_ORIGINS")
 
+CACHE_URL = env("CACHE_URL", default="")
+CACHES = {
+    "default": (
+        {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": CACHE_URL,
+        }
+        if CACHE_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "agentic-chat",
+        }
+    )
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -96,6 +112,18 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": env("DRF_ANON_RATE", default="60/min"),
+        "user": env("DRF_USER_RATE", default="600/min"),
+        "auth": env("DRF_AUTH_RATE", default="10/min"),
+        "token": env("DRF_TOKEN_RATE", default="20/min"),
+        "api_key": env("DRF_API_KEY_RATE", default="30/min"),
+    },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
@@ -117,6 +145,10 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_TIME_LIMIT = 60
 CELERY_TASK_SOFT_TIME_LIMIT = 45
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+REFERRER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
 
 LOGGING = {
     "version": 1,
