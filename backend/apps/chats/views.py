@@ -1,12 +1,16 @@
 from django.conf import settings
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.chats.services.audit import log_audit_event
+from apps.chats.services.assistant import stream_assistant_run
 
 from .models import AssistantRun, ChatSession, Message
 from .permissions import IsOwner
@@ -128,3 +132,15 @@ class AssistantRunViewSet(
             .prefetch_related("tool_calls")
             .order_by("-created_at")
         )
+
+    @extend_schema(responses={200: OpenApiTypes.STR})
+    @action(detail=True, methods=["get"])
+    def stream(self, request, pk=None):
+        run = self.get_object()
+        response = StreamingHttpResponse(
+            stream_assistant_run(run.id, request.user.id),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response

@@ -1,0 +1,201 @@
+import json
+from collections.abc import Iterator
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from openai import OpenAI
+
+from apps.chats.models import AssistantRun, Message
+from apps.chats.serializers import AssistantRunSerializer, MessageSerializer
+from apps.chats.services.audit import log_audit_event
+
+User = get_user_model()
+
+
+class AssistantRunError(Exception):
+    pass
+
+
+def format_sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def build_response_input(session) -> list[dict]:
+    messages = session.messages.order_by("created_at")
+    response_input = []
+
+    for message in messages:
+        if message.role not in {
+            Message.Role.SYSTEM,
+            Message.Role.USER,
+            Message.Role.ASSISTANT,
+        }:
+            continue
+
+        response_input.append(
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+        )
+
+    return response_input
+
+
+def get_usage_value(usage, name: str) -> int:
+    if usage is None:
+        return 0
+
+    if isinstance(usage, dict):
+        return usage.get(name, 0) or 0
+
+    return getattr(usage, name, 0) or 0
+
+
+def get_response_id(response) -> str:
+    if response is None:
+        return ""
+    return getattr(response, "id", "") or ""
+
+
+def stream_assistant_run(run_id, user_id) -> Iterator[str]:
+    run = (
+        AssistantRun.objects.select_related("session", "user_message", "assistant_message")
+        .filter(id=run_id, session__user_id=user_id)
+        .first()
+    )
+    user = User.objects.filter(id=user_id).first()
+
+    if run is None:
+        yield format_sse("error", {"detail": "Run not found."})
+        return
+
+    if run.status not in {AssistantRun.Status.QUEUED, AssistantRun.Status.FAILED}:
+        yield format_sse("error", {"detail": f"Run is already {run.status}."})
+        return
+
+    if not settings.OPENAI_API_KEY:
+        run.status = AssistantRun.Status.FAILED
+        run.error = "OPENAI_API_KEY is not configured."
+        run.completed_at = timezone.now()
+        run.save(update_fields=["status", "error", "completed_at", "updated_at"])
+        yield format_sse("error", {"detail": run.error})
+        return
+
+    run.status = AssistantRun.Status.RUNNING
+    run.started_at = timezone.now()
+    run.model = run.model or settings.OPENAI_MODEL
+    run.error = ""
+    run.save(update_fields=["status", "started_at", "model", "error", "updated_at"])
+
+    yield format_sse("run.started", AssistantRunSerializer(run).data)
+
+    text_parts: list[str] = []
+    final_response = None
+
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        stream = client.responses.create(
+            model=run.model,
+            input=build_response_input(run.session),
+            stream=True,
+            metadata={
+                "run_id": str(run.id),
+                "session_id": str(run.session_id),
+                "user_id": str(user_id),
+            },
+        )
+
+        for event in stream:
+            event_type = getattr(event, "type", "")
+
+            if event_type == "response.created":
+                response = getattr(event, "response", None)
+                response_id = get_response_id(response)
+                if response_id and response_id != run.provider_response_id:
+                    run.provider_response_id = response_id
+                    run.save(update_fields=["provider_response_id", "updated_at"])
+                yield format_sse("response.created", {"response_id": response_id})
+
+            elif event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    text_parts.append(delta)
+                    yield format_sse("delta", {"text": delta})
+
+            elif event_type == "response.completed":
+                final_response = getattr(event, "response", None)
+
+            elif event_type in {"response.failed", "response.incomplete"}:
+                response = getattr(event, "response", None)
+                raise AssistantRunError(str(getattr(response, "error", "") or event_type))
+
+        final_text = "".join(text_parts).strip()
+        if not final_text:
+            raise AssistantRunError("Assistant response was empty.")
+
+        response_id = get_response_id(final_response)
+        usage = getattr(final_response, "usage", None)
+
+        assistant_message = Message.objects.create(
+            session=run.session,
+            role=Message.Role.ASSISTANT,
+            content=final_text,
+            metadata={"provider_response_id": response_id},
+        )
+
+        run.assistant_message = assistant_message
+        run.status = AssistantRun.Status.COMPLETED
+        run.provider_response_id = response_id or run.provider_response_id
+        run.prompt_tokens = get_usage_value(usage, "input_tokens")
+        run.completion_tokens = get_usage_value(usage, "output_tokens")
+        run.total_tokens = get_usage_value(usage, "total_tokens")
+        run.completed_at = timezone.now()
+        run.save(
+            update_fields=[
+                "assistant_message",
+                "status",
+                "provider_response_id",
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "completed_at",
+                "updated_at",
+            ]
+        )
+        run.session.save(update_fields=["updated_at"])
+
+        log_audit_event(
+            action="assistant_run.completed",
+            actor=user,
+            target_type="assistant_run",
+            target_id=run.pk,
+            metadata={
+                "session_id": str(run.session_id),
+                "message_id": str(assistant_message.pk),
+                "total_tokens": run.total_tokens,
+            },
+        )
+
+        yield format_sse(
+            "run.completed",
+            {
+                "run": AssistantRunSerializer(run).data,
+                "message": MessageSerializer(assistant_message).data,
+            },
+        )
+
+    except Exception as exc:
+        run.status = AssistantRun.Status.FAILED
+        run.error = str(exc)
+        run.completed_at = timezone.now()
+        run.save(update_fields=["status", "error", "completed_at", "updated_at"])
+        log_audit_event(
+            action="assistant_run.failed",
+            actor=user,
+            target_type="assistant_run",
+            target_id=run.pk,
+            metadata={"error": run.error},
+        )
+        yield format_sse("error", {"detail": run.error})
