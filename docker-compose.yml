@@ -4,6 +4,12 @@ services:
       context: ./backend
     env_file:
       - .env
+    environment:
+      DD_SERVICE: agentic-chat-api
+      DD_ENV: ${DD_ENV:-local}
+      DD_VERSION: ${DD_VERSION:-local}
+      DD_TRACE_ENABLED: ${DD_TRACE_ENABLED:-false}
+      DD_LOGS_INJECTION: ${DD_LOGS_INJECTION:-true}
     ports:
       - "8000:8000"
     depends_on:
@@ -16,6 +22,12 @@ services:
       context: ./backend
     env_file:
       - .env
+    environment:
+      DD_SERVICE: agentic-chat-worker
+      DD_ENV: ${DD_ENV:-local}
+      DD_VERSION: ${DD_VERSION:-local}
+      DD_TRACE_ENABLED: ${DD_TRACE_ENABLED:-false}
+      DD_LOGS_INJECTION: ${DD_LOGS_INJECTION:-true}
     depends_on:
       - postgres
       - redis
@@ -26,6 +38,12 @@ services:
       context: ./backend
     env_file:
       - .env
+    environment:
+      DD_SERVICE: agentic-chat-beat
+      DD_ENV: ${DD_ENV:-local}
+      DD_VERSION: ${DD_VERSION:-local}
+      DD_TRACE_ENABLED: ${DD_TRACE_ENABLED:-false}
+      DD_LOGS_INJECTION: ${DD_LOGS_INJECTION:-true}
     depends_on:
       - postgres
       - redis
@@ -36,6 +54,10 @@ services:
       context: ./frontend
     env_file:
       - .env
+    environment:
+      DD_SERVICE: agentic-chat-frontend
+      DD_ENV: ${DD_ENV:-local}
+      DD_VERSION: ${DD_VERSION:-local}
     ports:
       - "5173:5173"
     command: npm run dev -- --host 0.0.0.0

@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 from collections.abc import Iterator
 
 from django.conf import settings
@@ -17,6 +19,7 @@ from apps.chats.services.tools import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class AssistantRunError(Exception):
@@ -144,6 +147,7 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
     call_id = get_item_value(item, "call_id")
     name = get_item_value(item, "name")
     raw_arguments = get_item_value(item, "arguments", "{}")
+    started = time.perf_counter()
 
     try:
         arguments = parse_tool_arguments(raw_arguments)
@@ -156,6 +160,17 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
             arguments={},
             error=str(exc),
             completed_at=timezone.now(),
+        )
+        logger.warning(
+            "agent.tool_call.invalid_arguments",
+            extra={
+                "run_id": str(run.id),
+                "session_id": str(run.session_id),
+                "tool_name": name,
+                "tool_call_id": str(tool_call.id),
+                "external_id": call_id,
+                "error": tool_call.error,
+            },
         )
         return {
             "type": "function_call_output",
@@ -170,6 +185,16 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
         status=ToolCall.Status.RUNNING,
         arguments=arguments,
         started_at=timezone.now(),
+    )
+    logger.info(
+        "agent.tool_call.started",
+        extra={
+            "run_id": str(run.id),
+            "session_id": str(run.session_id),
+            "tool_name": name,
+            "tool_call_id": str(tool_call.id),
+            "external_id": call_id,
+        },
     )
 
     try:
@@ -197,6 +222,8 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
         tool_call.error = str(exc)
 
     tool_call.completed_at = timezone.now()
+    if not tool_call.duration_ms:
+        tool_call.duration_ms = round((time.perf_counter() - started) * 1000)
     tool_call.save(
         update_fields=[
             "status",
@@ -206,6 +233,18 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
             "completed_at",
             "updated_at",
         ]
+    )
+    logger.info(
+        "agent.tool_call.finished",
+        extra={
+            "run_id": str(run.id),
+            "session_id": str(run.session_id),
+            "tool_name": tool_call.name,
+            "tool_call_id": str(tool_call.id),
+            "status": tool_call.status,
+            "duration_ms": tool_call.duration_ms,
+            "error": tool_call.error,
+        },
     )
 
     if tool_call.status != ToolCall.Status.COMPLETED:
@@ -221,6 +260,7 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
 
 
 def stream_assistant_run(run_id, user_id) -> Iterator[str]:
+    started = time.perf_counter()
     run = (
         AssistantRun.objects.select_related("session", "user_message", "assistant_message")
         .filter(id=run_id, session__user_id=user_id)
@@ -249,6 +289,15 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
     run.model = run.model or settings.OPENAI_MODEL
     run.error = ""
     run.save(update_fields=["status", "started_at", "model", "error", "updated_at"])
+    logger.info(
+        "agent.run.started",
+        extra={
+            "run_id": str(run.id),
+            "session_id": str(run.session_id),
+            "user_id": str(user_id),
+            "model": run.model,
+        },
+    )
 
     yield format_sse("run.started", AssistantRunSerializer(run).data)
 
@@ -383,6 +432,19 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
                 "total_tokens": run.total_tokens,
             },
         )
+        logger.info(
+            "agent.run.completed",
+            extra={
+                "run_id": str(run.id),
+                "session_id": str(run.session_id),
+                "user_id": str(user_id),
+                "model": run.model,
+                "prompt_tokens": run.prompt_tokens,
+                "completion_tokens": run.completion_tokens,
+                "total_tokens": run.total_tokens,
+                "duration_ms": round((time.perf_counter() - started) * 1000),
+            },
+        )
 
         yield format_sse(
             "run.completed",
@@ -403,5 +465,16 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
             target_type="assistant_run",
             target_id=run.pk,
             metadata={"error": run.error},
+        )
+        logger.exception(
+            "agent.run.failed",
+            extra={
+                "run_id": str(run.id),
+                "session_id": str(run.session_id),
+                "user_id": str(user_id),
+                "model": run.model,
+                "duration_ms": round((time.perf_counter() - started) * 1000),
+                "error": run.error,
+            },
         )
         yield format_sse("error", {"detail": run.error})

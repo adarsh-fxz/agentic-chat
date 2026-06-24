@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.db import connection
 import redis
@@ -6,9 +8,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+logger = logging.getLogger(__name__)
+
 
 class HealthCheckView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = []
 
     @extend_schema(auth=[], responses={200: dict, 503: dict})
     def get(self, request):
@@ -32,6 +37,7 @@ class HealthCheckView(APIView):
 
 class QueueHealthView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = []
 
     @extend_schema(auth=[], responses={200: dict, 503: dict})
     def get(self, request):
@@ -49,6 +55,7 @@ class QueueHealthView(APIView):
                 status=503,
             )
 
+        logger.info("queue.health", extra={"queue_backlog": queue_backlog})
         return Response(
             {
                 "status": "ok",

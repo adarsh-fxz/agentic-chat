@@ -1,9 +1,13 @@
+import logging
+
 from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
 from apps.chats.models import AssistantRun, ToolCall
 from apps.chats.services.tools import ToolTimeoutError, execute_tool
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, autoretry_for=(ToolTimeoutError,), max_retries=1, retry_backoff=True)
@@ -21,6 +25,15 @@ def execute_tool_call_task(self, tool_call_id: str) -> dict:
     tool_call.status = ToolCall.Status.RUNNING
     tool_call.started_at = tool_call.started_at or timezone.now()
     tool_call.save(update_fields=["status", "started_at", "updated_at"])
+    logger.info(
+        "celery.tool_call.started",
+        extra={
+            "tool_call_id": str(tool_call.id),
+            "run_id": str(tool_call.run_id),
+            "tool_name": tool_call.name,
+            "task_id": self.request.id,
+        },
+    )
 
     try:
         result, error, duration_ms = execute_tool(tool_call.name, tool_call.arguments)
@@ -47,6 +60,18 @@ def execute_tool_call_task(self, tool_call_id: str) -> dict:
                 "updated_at",
             ]
         )
+        logger.info(
+            "celery.tool_call.finished",
+            extra={
+                "tool_call_id": str(tool_call.id),
+                "run_id": str(tool_call.run_id),
+                "tool_name": tool_call.name,
+                "status": tool_call.status,
+                "duration_ms": tool_call.duration_ms,
+                "task_id": self.request.id,
+                "error": tool_call.error,
+            },
+        )
 
     return {
         "status": tool_call.status,
@@ -68,5 +93,9 @@ def fail_stale_assistant_runs() -> int:
         error="Assistant run timed out.",
         completed_at=timezone.now(),
         updated_at=timezone.now(),
+    )
+    logger.info(
+        "celery.assistant_runs.marked_stale",
+        extra={"count": count, "cutoff": cutoff.isoformat()},
     )
     return count
