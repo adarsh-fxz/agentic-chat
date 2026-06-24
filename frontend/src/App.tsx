@@ -1,15 +1,29 @@
+import { AuthScreen } from "./components/auth/AuthScreen";
+import { ChatWorkspace } from "./components/chat/ChatWorkspace";
+import { useChatApp } from "./hooks/useChatApp";
 import "./styles.css";
 
 export function App() {
-  return (
-    <main className="shell">
-      <section className="intro">
-        <p className="eyebrow">Agentic Chat</p>
-        <h1>Chat workspace.</h1>
-        <p>
-          The API and chat flow are being built out behind this shell.
-        </p>
-      </section>
-    </main>
-  );
+  const state = useChatApp();
+
+  if (!state.user) {
+    return (
+      <AuthScreen
+        mode={state.authMode}
+        username={state.username}
+        email={state.email}
+        password={state.password}
+        error={state.error}
+        isBooting={state.isBooting}
+        isSubmitting={state.isAuthSubmitting}
+        onUsernameChange={state.setUsername}
+        onEmailChange={state.setEmail}
+        onPasswordChange={state.setPassword}
+        onSubmit={state.handleAuthSubmit}
+        onToggleMode={state.toggleAuthMode}
+      />
+    );
+  }
+
+  return <ChatWorkspace state={state} />;
 }

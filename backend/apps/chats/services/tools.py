@@ -141,7 +141,7 @@ TOOL_REGISTRY = {
                     "default": 5,
                 },
             },
-            "required": ["session_id"],
+            "required": ["session_id", "max_messages"],
             "additionalProperties": False,
         },
         handler=session_summary,
