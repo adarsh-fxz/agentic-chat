@@ -176,11 +176,19 @@ def execute_model_tool_call(run, item) -> tuple[dict, ToolCall]:
         if name == "session_summary" and str(arguments.get("session_id")) != str(run.session_id):
             raise ToolExecutionError("session_summary can only read the current chat session.")
 
-        result, error, duration_ms = execute_tool(name, arguments)
-        tool_call.status = ToolCall.Status.COMPLETED
-        tool_call.result = result
-        tool_call.error = error
-        tool_call.duration_ms = duration_ms
+        if settings.AGENT_TOOLS_USE_CELERY:
+            from apps.chats.tasks import execute_tool_call_task
+
+            execute_tool_call_task.apply_async(args=[str(tool_call.id)]).get(
+                timeout=settings.AGENT_TOOL_TIMEOUT_SECONDS + 2,
+            )
+            tool_call.refresh_from_db()
+        else:
+            result, error, duration_ms = execute_tool(name, arguments)
+            tool_call.status = ToolCall.Status.COMPLETED
+            tool_call.result = result
+            tool_call.error = error
+            tool_call.duration_ms = duration_ms
     except ToolTimeoutError as exc:
         tool_call.status = ToolCall.Status.TIMED_OUT
         tool_call.error = str(exc)

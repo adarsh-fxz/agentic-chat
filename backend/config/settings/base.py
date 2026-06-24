@@ -145,10 +145,24 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_TIME_LIMIT = 60
 CELERY_TASK_SOFT_TIME_LIMIT = 45
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TASK_STORE_EAGER_RESULT = env.bool("CELERY_TASK_STORE_EAGER_RESULT", default=False)
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BEAT_SCHEDULE = {
+    "fail-stale-assistant-runs": {
+        "task": "apps.chats.tasks.fail_stale_assistant_runs",
+        "schedule": 300,
+    },
+}
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4.1-mini")
 AGENT_TOOL_TIMEOUT_SECONDS = env.int("AGENT_TOOL_TIMEOUT_SECONDS", default=5)
+AGENT_TOOLS_USE_CELERY = env.bool("AGENT_TOOLS_USE_CELERY", default=True)
+AGENT_RUN_STALE_AFTER = timedelta(
+    minutes=env.int("AGENT_RUN_STALE_AFTER_MINUTES", default=10),
+)
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 REFERRER_POLICY = "same-origin"
