@@ -29,13 +29,15 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return (
-            ChatSession.objects.filter(
-                user=self.request.user,
-                archived_at__isnull=True,
-            )
-            .order_by("-updated_at")
-        )
+        queryset = ChatSession.objects.filter(user=self.request.user)
+
+        if self.action in {"restore", "permanent"}:
+            return queryset.order_by("-updated_at")
+
+        if self.action == "list" and self.request.query_params.get("archived") == "true":
+            return queryset.filter(archived_at__isnull=False).order_by("-updated_at")
+
+        return queryset.filter(archived_at__isnull=True).order_by("-updated_at")
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -69,6 +71,38 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
             target_type="chat_session",
             target_id=instance.pk,
         )
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        session = self.get_object()
+        session.archived_at = None
+        session.save(update_fields=["archived_at", "updated_at"])
+        log_audit_event(
+            action="chat_session.restored",
+            request=request,
+            target_type="chat_session",
+            target_id=session.pk,
+        )
+        return Response(ChatSessionSerializer(session).data)
+
+    @action(detail=True, methods=["delete"], url_path="permanent")
+    def permanent(self, request, pk=None):
+        session = self.get_object()
+        if session.archived_at is None:
+            return Response(
+                {"detail": "Archive the chat before permanently deleting it."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session_id = session.pk
+        session.delete()
+        log_audit_event(
+            action="chat_session.permanently_deleted",
+            request=request,
+            target_type="chat_session",
+            target_id=session_id,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["get", "post"])
     def messages(self, request, pk=None):

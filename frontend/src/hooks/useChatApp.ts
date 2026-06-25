@@ -8,8 +8,10 @@ import {
   listMessages,
   listSessions,
   login,
+  permanentlyDeleteSession,
   register,
   renameSession,
+  restoreSession,
   sendMessage,
   streamRun,
 } from "../api";
@@ -29,7 +31,9 @@ export function useChatApp() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_STORAGE_KEY) || "");
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
+  const [isViewingArchived, setIsViewingArchived] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [username, setUsername] = useState("");
@@ -39,6 +43,7 @@ export function useChatApp() {
   const [isBooting, setIsBooting] = useState(Boolean(token));
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [isLoadingArchivedSessions, setIsLoadingArchivedSessions] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [streamText, setStreamText] = useState("");
@@ -74,12 +79,14 @@ export function useChatApp() {
     setError("");
 
     try {
-      const [profile, sessionList] = await Promise.all([
+      const [profile, sessionList, archivedSessionList] = await Promise.all([
         getMe(currentToken),
         listSessions(currentToken),
+        listSessions(currentToken, true),
       ]);
       setUser(profile);
       setSessions(sessionList);
+      setArchivedSessions(archivedSessionList);
       setActiveSessionId((current) => current || sessionList[0]?.id || "");
     } catch (err) {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -102,6 +109,30 @@ export function useChatApp() {
     } finally {
       setIsLoadingMessages(false);
     }
+  }
+
+  async function loadArchivedSessions(currentToken = token) {
+    if (!currentToken) return;
+
+    setIsLoadingArchivedSessions(true);
+    setError("");
+
+    try {
+      setArchivedSessions(await listSessions(currentToken, true));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setIsLoadingArchivedSessions(false);
+    }
+  }
+
+  function handleShowActiveChats() {
+    setIsViewingArchived(false);
+  }
+
+  function handleShowArchivedChats() {
+    setIsViewingArchived(true);
+    void loadArchivedSessions();
   }
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
@@ -174,6 +205,36 @@ export function useChatApp() {
         }
         return next;
       });
+      void loadArchivedSessions();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function handleRestoreSession(sessionId: string) {
+    if (!token) return;
+
+    setError("");
+
+    try {
+      const restored = await restoreSession(token, sessionId);
+      setArchivedSessions((current) => current.filter((session) => session.id !== sessionId));
+      setSessions((current) => [restored, ...current]);
+      setIsViewingArchived(false);
+      setActiveSessionId(restored.id);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function handlePermanentDeleteSession(sessionId: string) {
+    if (!token) return;
+
+    setError("");
+
+    try {
+      await permanentlyDeleteSession(token, sessionId);
+      setArchivedSessions((current) => current.filter((session) => session.id !== sessionId));
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -252,8 +313,10 @@ export function useChatApp() {
     setToken("");
     setUser(null);
     setSessions([]);
+    setArchivedSessions([]);
     setMessages([]);
     setActiveSessionId("");
+    setIsViewingArchived(false);
     setStreamText("");
     setStreamStatus("");
     setError("");
@@ -262,8 +325,10 @@ export function useChatApp() {
   return {
     user,
     sessions,
+    archivedSessions,
     activeSession,
     activeSessionId,
+    isViewingArchived,
     messages,
     authMode,
     username,
@@ -273,6 +338,7 @@ export function useChatApp() {
     isBooting,
     isAuthSubmitting,
     isLoadingSessions,
+    isLoadingArchivedSessions,
     isLoadingMessages,
     isSending,
     streamText,
@@ -289,6 +355,10 @@ export function useChatApp() {
     handleNewSession,
     handleRenameSession,
     handleDeleteSession,
+    handleRestoreSession,
+    handlePermanentDeleteSession,
+    handleShowActiveChats,
+    handleShowArchivedChats,
     handleSendMessage,
     handleComposerKeyDown,
     toggleAuthMode,

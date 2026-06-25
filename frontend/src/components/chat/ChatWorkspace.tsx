@@ -22,12 +22,19 @@ export function ChatWorkspace({ state }: ChatWorkspaceProps) {
       <SessionSidebar
         user={state.user}
         sessions={state.sessions}
+        archivedSessions={state.archivedSessions}
         activeSessionId={state.activeSessionId}
         isLoading={state.isLoadingSessions}
+        isLoadingArchived={state.isLoadingArchivedSessions}
+        isViewingArchived={state.isViewingArchived}
         onCreateSession={state.handleNewSession}
         onSelectSession={state.setActiveSessionId}
         onRenameSession={state.handleRenameSession}
         onDeleteSession={state.handleDeleteSession}
+        onRestoreSession={state.handleRestoreSession}
+        onPermanentDeleteSession={state.handlePermanentDeleteSession}
+        onShowActiveChats={state.handleShowActiveChats}
+        onShowArchivedChats={state.handleShowArchivedChats}
         onSignOut={state.handleSignOut}
       />
 

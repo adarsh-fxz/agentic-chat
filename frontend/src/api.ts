@@ -79,8 +79,9 @@ export function getMe(token: string) {
   return request<User>("/api/auth/me/", { token });
 }
 
-export function listSessions(token: string) {
-  return request<ChatSession[]>("/api/chats/sessions/", { token });
+export function listSessions(token: string, archived = false) {
+  const suffix = archived ? "?archived=true" : "";
+  return request<ChatSession[]>(`/api/chats/sessions/${suffix}`, { token });
 }
 
 export function createSession(token: string, title: string) {
@@ -101,6 +102,20 @@ export function renameSession(token: string, sessionId: string, title: string) {
 
 export function deleteSession(token: string, sessionId: string) {
   return request<void>(`/api/chats/sessions/${sessionId}/`, {
+    token,
+    method: "DELETE",
+  });
+}
+
+export function restoreSession(token: string, sessionId: string) {
+  return request<ChatSession>(`/api/chats/sessions/${sessionId}/restore/`, {
+    token,
+    method: "POST",
+  });
+}
+
+export function permanentlyDeleteSession(token: string, sessionId: string) {
+  return request<void>(`/api/chats/sessions/${sessionId}/permanent/`, {
     token,
     method: "DELETE",
   });
