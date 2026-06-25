@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.db import transaction
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -11,6 +10,7 @@ from rest_framework.response import Response
 
 from apps.chats.services.audit import log_audit_event
 from apps.chats.services.assistant import stream_assistant_run
+from apps.chats.services.providers import get_active_provider_config
 
 from .models import AssistantRun, ChatSession, Message
 from .permissions import IsOwner
@@ -92,11 +92,13 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
         )
         session.save(update_fields=["updated_at"])
 
+        provider = get_active_provider_config()
         run = AssistantRun.objects.create(
             session=session,
             user_message=message,
             status=AssistantRun.Status.QUEUED,
-            model=settings.OPENAI_MODEL,
+            provider=provider.name,
+            model=provider.model,
         )
 
         log_audit_event(

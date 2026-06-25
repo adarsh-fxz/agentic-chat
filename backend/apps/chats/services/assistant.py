@@ -6,11 +6,11 @@ from collections.abc import Iterator
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from openai import OpenAI
 
 from apps.chats.models import AssistantRun, Message, ToolCall
 from apps.chats.serializers import AssistantRunSerializer, MessageSerializer, ToolCallSerializer
 from apps.chats.services.audit import log_audit_event
+from apps.chats.services.providers import create_provider_client, get_provider_config
 from apps.chats.services.tools import (
     ToolExecutionError,
     ToolTimeoutError,
@@ -276,9 +276,10 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
         yield format_sse("error", {"detail": f"Run is already {run.status}."})
         return
 
-    if not settings.OPENAI_API_KEY:
+    provider = get_provider_config(run.provider)
+    if not provider.api_key:
         run.status = AssistantRun.Status.FAILED
-        run.error = "OPENAI_API_KEY is not configured."
+        run.error = f"{provider.api_key_setting} is not configured."
         run.completed_at = timezone.now()
         run.save(update_fields=["status", "error", "completed_at", "updated_at"])
         yield format_sse("error", {"detail": run.error})
@@ -286,15 +287,17 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
 
     run.status = AssistantRun.Status.RUNNING
     run.started_at = timezone.now()
-    run.model = run.model or settings.OPENAI_MODEL
+    run.provider = provider.name
+    run.model = run.model or provider.model
     run.error = ""
-    run.save(update_fields=["status", "started_at", "model", "error", "updated_at"])
+    run.save(update_fields=["status", "started_at", "provider", "model", "error", "updated_at"])
     logger.info(
         "agent.run.started",
         extra={
             "run_id": str(run.id),
             "session_id": str(run.session_id),
             "user_id": str(user_id),
+            "provider": run.provider,
             "model": run.model,
         },
     )
@@ -311,7 +314,7 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
     }
 
     try:
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        client = create_provider_client(provider)
         stream = client.responses.create(
             model=run.model,
             input=input_list,
@@ -321,6 +324,7 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
                 "run_id": str(run.id),
                 "session_id": str(run.session_id),
                 "user_id": str(user_id),
+                "provider": run.provider,
             },
         )
 
@@ -368,6 +372,7 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
                     "run_id": str(run.id),
                     "session_id": str(run.session_id),
                     "user_id": str(user_id),
+                    "provider": run.provider,
                 },
             )
 
@@ -438,6 +443,7 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
                 "run_id": str(run.id),
                 "session_id": str(run.session_id),
                 "user_id": str(user_id),
+                "provider": run.provider,
                 "model": run.model,
                 "prompt_tokens": run.prompt_tokens,
                 "completion_tokens": run.completion_tokens,
@@ -472,6 +478,7 @@ def stream_assistant_run(run_id, user_id) -> Iterator[str]:
                 "run_id": str(run.id),
                 "session_id": str(run.session_id),
                 "user_id": str(user_id),
+                "provider": run.provider,
                 "model": run.model,
                 "duration_ms": round((time.perf_counter() - started) * 1000),
                 "error": run.error,

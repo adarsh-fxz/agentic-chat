@@ -160,8 +160,13 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+AI_PROVIDER = env("AI_PROVIDER", default="openai")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4.1-mini")
+OPENAI_BASE_URL = env("OPENAI_BASE_URL", default="")
+GROQ_API_KEY = env("GROQ_API_KEY", default="")
+GROQ_MODEL = env("GROQ_MODEL", default="llama-3.3-70b-versatile")
+GROQ_BASE_URL = env("GROQ_BASE_URL", default="https://api.groq.com/openai/v1")
 AGENT_TOOL_TIMEOUT_SECONDS = env.int("AGENT_TOOL_TIMEOUT_SECONDS", default=5)
 AGENT_TOOLS_USE_CELERY = env.bool("AGENT_TOOLS_USE_CELERY", default=True)
 AGENT_RUN_STALE_AFTER = timedelta(
