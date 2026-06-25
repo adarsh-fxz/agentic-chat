@@ -3,11 +3,13 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "
 import {
   ApiError,
   createSession,
+  deleteSession,
   getMe,
   listMessages,
   listSessions,
   login,
   register,
+  renameSession,
   sendMessage,
   streamRun,
 } from "../api";
@@ -16,6 +18,12 @@ import type { ChatSession, Message, User } from "../types";
 export type AuthMode = "login" | "register";
 
 const TOKEN_STORAGE_KEY = "agentic-chat-access-token";
+
+function buildSessionTitle(content: string) {
+  const title = content.replace(/\s+/g, " ").trim();
+  if (!title) return "New chat";
+  return title.length > 48 ? `${title.slice(0, 45)}...` : title;
+}
 
 export function useChatApp() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_STORAGE_KEY) || "");
@@ -135,6 +143,42 @@ export function useChatApp() {
     }
   }
 
+  async function handleRenameSession(sessionId: string, title: string) {
+    if (!token) return;
+
+    const cleanTitle = title.trim() || "Untitled chat";
+    setError("");
+
+    try {
+      const updated = await renameSession(token, sessionId, cleanTitle);
+      setSessions((current) =>
+        current.map((session) => (session.id === updated.id ? updated : session)),
+      );
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    if (!token || isSending) return;
+
+    setError("");
+
+    try {
+      await deleteSession(token, sessionId);
+      setSessions((current) => {
+        const next = current.filter((session) => session.id !== sessionId);
+        if (sessionId === activeSessionId) {
+          setActiveSessionId(next[0]?.id || "");
+          setMessages([]);
+        }
+        return next;
+      });
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
   async function handleSendMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const content = composer.trim();
@@ -148,6 +192,17 @@ export function useChatApp() {
     setError("");
 
     try {
+      const sessionBeforeSend = activeSession;
+      if (sessionBeforeSend && sessionBeforeSend.title === "New chat" && messages.length === 0) {
+        const title = buildSessionTitle(content);
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === activeSessionId ? { ...session, title } : session,
+          ),
+        );
+        void handleRenameSession(activeSessionId, title);
+      }
+
       const created = await sendMessage(token, activeSessionId, content);
       setMessages((current) => [...current, created.message]);
 
@@ -232,6 +287,8 @@ export function useChatApp() {
     setError,
     handleAuthSubmit,
     handleNewSession,
+    handleRenameSession,
+    handleDeleteSession,
     handleSendMessage,
     handleComposerKeyDown,
     toggleAuthMode,

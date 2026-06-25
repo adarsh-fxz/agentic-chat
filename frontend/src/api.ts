@@ -91,6 +91,21 @@ export function createSession(token: string, title: string) {
   });
 }
 
+export function renameSession(token: string, sessionId: string, title: string) {
+  return request<ChatSession>(`/api/chats/sessions/${sessionId}/`, {
+    token,
+    method: "PATCH",
+    body: { title },
+  });
+}
+
+export function deleteSession(token: string, sessionId: string) {
+  return request<void>(`/api/chats/sessions/${sessionId}/`, {
+    token,
+    method: "DELETE",
+  });
+}
+
 export function listMessages(token: string, sessionId: string) {
   return request<Message[]>(`/api/chats/sessions/${sessionId}/messages/`, {
     token,

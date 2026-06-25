@@ -26,6 +26,8 @@ export function ChatWorkspace({ state }: ChatWorkspaceProps) {
         isLoading={state.isLoadingSessions}
         onCreateSession={state.handleNewSession}
         onSelectSession={state.setActiveSessionId}
+        onRenameSession={state.handleRenameSession}
+        onDeleteSession={state.handleDeleteSession}
         onSignOut={state.handleSignOut}
       />
 
