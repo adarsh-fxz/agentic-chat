@@ -2,6 +2,7 @@ import { Bot, UserRound } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import type { Message } from "../../types";
+import { MarkdownContent } from "./MarkdownContent";
 
 type MessageBubbleProps = {
   message: Message;
@@ -33,7 +34,13 @@ export function MessageBubble({ message, streaming }: MessageBubbleProps) {
           streaming && "border-blue-200 bg-blue-50 text-slate-950",
         )}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <div className="max-w-none leading-7">
+            <MarkdownContent content={message.content} inverted={streaming} />
+          </div>
+        )}
       </div>
     </article>
   );
